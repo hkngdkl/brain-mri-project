@@ -1,0 +1,41 @@
+# Python bytecode files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Virtual environments
+.venv/
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Output folders
+outputs/
+
+# Data folders (brain MRI and synthetic)
+data/brain-mri/
+data/synthetic/
+
+# System files (Mac OS, Windows, etc.)
+.DS_Store
+Thumbs.db
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# PyInstaller build
+*.spec
+build/
+dist/
+
+# pipenv
+Pipfile.lock
+
+# Others
+*.log
+model/
