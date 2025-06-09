@@ -1,50 +1,35 @@
-# 📦 Required Imports
 import gradio as gr
 import torch
 from torchvision import models, transforms
 from PIL import Image
 from datetime import datetime
+import os
+from fpdf import FPDF
+from fpdf.enums import XPos, YPos
 
-# 🧠 Model path and class labels
-MODEL_PATH = "model/classifier.pt"
+# 🧠 Class labels
 CLASS_NAMES = ["glioma", "meningioma", "no_tumor", "pituitary"]
 
-# 🌐 Descriptions (English + Turkish)
-DESCRIPTIONS = {
-    "glioma": {
-        "en": "Gliomas are tumors that occur in the brain and spinal cord. They are often invasive and can impact vital brain functions.",
-        "tr": "Gliomlar, beyin ve omurilikte oluşan tümörlerdir. Genellikle invazivdirler ve hayati beyin fonksiyonlarını etkileyebilirler."
-    },
-    "meningioma": {
-        "en": "Meningiomas are usually benign tumors that arise from the meninges, the membranes surrounding the brain and spinal cord.",
-        "tr": "Meningiomlar, genellikle iyi huylu olup, beyin ve omuriliği çeviren zar tabakasından köken alırlar."
-    },
-    "no_tumor": {
-        "en": "No brain tumor detected in the MRI scan.",
-        "tr": "MR görüntüsünde tespit edilen herhangi bir tümör yoktur."
-    },
-    "pituitary": {
-        "en": "Pituitary tumors are abnormal growths that develop in the pituitary gland, affecting hormone regulation.",
-        "tr": "Hipofiz tümörleri, hipofiz bezinde gelişen ve hormon dengesini etkileyen anormal büyümelerdir."
-    }
-}
+# 🔄 Load selected model
+def load_model():
+    model = models.efficientnet_b0(weights=None)
+    model.classifier[1] = torch.nn.Linear(model.classifier[1].in_features, len(CLASS_NAMES))
+    model.load_state_dict(torch.load("model/efficientnetb0_classifier.pt", map_location="cpu"))
+    model.eval()
+    return model
 
 # 🧪 Image transformation
 transform = transforms.Compose([
     transforms.Resize((224, 224)),
     transforms.Grayscale(num_output_channels=3),
     transforms.ToTensor(),
-    transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    transforms.Normalize([0.485, 0.456, 0.406],
+                         [0.229, 0.224, 0.225])
 ])
-
-# 🔄 Load trained model
-model = models.resnet50(weights=None)
-model.fc = torch.nn.Linear(model.fc.in_features, len(CLASS_NAMES))
-model.load_state_dict(torch.load(MODEL_PATH, map_location="cpu"))
-model.eval()
 
 # 🔍 Prediction function
 def predict(image: Image.Image):
+    model = load_model()
     image = transform(image.convert("RGB")).unsqueeze(0)
     with torch.no_grad():
         outputs = model(image)
@@ -53,57 +38,63 @@ def predict(image: Image.Image):
         confidence = probabilities[0][predicted_index].item()
 
     predicted_class = CLASS_NAMES[predicted_index]
-    desc_en = DESCRIPTIONS[predicted_class]["en"]
-    desc_tr = DESCRIPTIONS[predicted_class]["tr"]
+    description = DESCRIPTIONS.get(predicted_class.lower(), "No description available.")
 
-    full_description = f"**EN:** {desc_en}\n\n**TR:** {desc_tr}"
+    return predicted_class.title(), f"{confidence * 100:.2f}%", description, predicted_class, confidence
 
-    return predicted_class.title(), f"{confidence * 100:.2f}%", full_description, predicted_class, confidence
+# 📝 PDF Report Generator
+def generate_pdf_report(predicted_class, confidence):
+    now = datetime.now().strftime("%d-%m-%Y_%H-%M-%S")
+    os.makedirs("outputs", exist_ok=True)
+    pdf_file = f"outputs/{predicted_class}_{now}.pdf"
 
-# 📄 Report generator function
-def generate_report(predicted_class, confidence):
-    now = datetime.now().strftime("%d %B %Y - %H:%M")
-    confidence_value = float(confidence.replace("%", ""))
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=12)
 
-    warning = ""
-    if confidence_value < 60:
-        warning = "**⚠️ Warning:** The confidence level is low. Additional medical evaluation is recommended.\n\n"
+    # Başlık
+    pdf.cell(0, 10, "Brain MRI Diagnostic Report", new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="C")
 
-    desc_en = DESCRIPTIONS[predicted_class.lower()]["en"]
-    desc_tr = DESCRIPTIONS[predicted_class.lower()]["tr"]
+    # Tarih ve Saat
+    pdf.cell(0, 10, f"Date & Time: {now}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
-    report = (
-        f"# 🧠 Brain MRI Diagnostic Report\n\n"
-        f"**📅 Date & Time:** {now}\n\n"
-        f"## 🔍 Prediction Summary\n"
-        f"- **Tumor Type:** {predicted_class.title()}\n"
-        f"- **Confidence:** {confidence}\n\n"
-        f"{warning}"
-        f"---\n"
-        f"## 📖 Tumor Description\n\n"
-        f"**EN:** {desc_en}\n\n"
-        f"**TR:** {desc_tr}\n\n"
-        f"---\n"
-        f"_Generated automatically by AI Diagnostic Assistant._"
-    )
-    return report
+    # Tahmin edilen sınıf
+    pdf.cell(0, 10, f"Tumor Type: {predicted_class.title()}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+    # Güven düzeyi
+    pdf.cell(0, 10, f"Confidence: {confidence}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+    # Açıklama
+    desc = DESCRIPTIONS.get(predicted_class.lower(), "No description available.")
+    pdf.multi_cell(0, 10, f"Description: {desc}")
+
+    pdf.output(pdf_file)
+    return pdf_file
+
+# 🌐 Descriptions
+DESCRIPTIONS = {
+    "glioma": "Gliomas are tumors that occur in the brain and spinal cord. They are often invasive and can impact vital brain functions.",
+    "meningioma": "Meningiomas are usually benign tumors that arise from the meninges, the membranes surrounding the brain and spinal cord.",
+    "no_tumor": "No brain tumor detected in the MRI scan.",
+    "pituitary": "Pituitary tumors are abnormal growths that develop in the pituitary gland, affecting hormone regulation."
+}
 
 # 🌐 Gradio Interface
 with gr.Blocks() as demo:
-    gr.Markdown("# 🧠 Brain MRI Tumor Classifier")
+    gr.Markdown("# 🧠 Brain MRI Tumor Classifier (EfficientNetB0 Model)")
 
     image_input = gr.Image(type="pil", label="Upload Brain MRI Image")
+
     predict_btn = gr.Button("🔮 Predict")
     tumor_label = gr.Label(label="Predicted Tumor Type")
     confidence_box = gr.Textbox(label="Confidence (%)")
-    description_md = gr.Markdown()
+    description_md = gr.Textbox(label="Description")
     hidden_class = gr.Textbox(visible=False)
     hidden_confidence = gr.Textbox(visible=False)
 
     report_btn = gr.Button("📝 Generate Diagnostic Report")
-    report_output = gr.Markdown()
+    pdf_output = gr.File(label="Download Diagnostic Report (PDF)")
 
-    # Click actions
     predict_btn.click(
         fn=predict,
         inputs=image_input,
@@ -111,9 +102,9 @@ with gr.Blocks() as demo:
     )
 
     report_btn.click(
-        fn=generate_report,
+        fn=generate_pdf_report,
         inputs=[hidden_class, confidence_box],
-        outputs=report_output
+        outputs=pdf_output
     )
 
-demo.launch(server_name="0.0.0.0", server_port=7860, share=False)
+demo.launch(server_name="0.0.0.0", server_port=7860, share=True)
